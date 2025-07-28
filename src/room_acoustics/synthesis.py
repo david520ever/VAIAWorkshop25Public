@@ -84,6 +84,12 @@ def decay_kernel(
     # calculate the decay time constant tau from T60 - save them in a variable called tau_vals
     # calculate the exponential decay kernel
 
+    # calculate the decay time constant tau from T60 - save them in a variable called tau_vals
+    tau_vals = t_values / 13.8  # T60 to tau conversion: tau = T60 / ln(1e6)
+    
+    # calculate the exponential decay kernel
+    exponential = np.exp(-time[np.newaxis, np.newaxis, :] / tau_vals[..., np.newaxis]) # shape: (n_bands, K, T)
+
     # normalise the kernel to have unit energy
     if normalize_envelope:
         exponential = np.einsum("ntb, nb -> ntb", exponential,
@@ -96,7 +102,14 @@ def decay_kernel(
         # generate the kernel for the noise, which should be a linearly decaying signal from ir_len to 0
         # tile it along the exponential decay kernel 
 
+        # generate the kernel for the noise, which should be a linearly decaying signal from ir_len to 0
+        noise = np.linspace(1.0, 0.0, ir_len)[np.newaxis, np.newaxis, :]  # shape (1,1,T)
+        
+        # tile it along the exponential decay kernel 
+        # Tile the linearly decaying noise so that each frequency band gets one noise component
+        noise = np.tile(noise, (exponential.shape[0], 1, 1))  # shape (n_bands, 1, T) 
+
         exponential = np.concatenate((exponential, noise), axis=-1)
-    
+
     return exponential
 
