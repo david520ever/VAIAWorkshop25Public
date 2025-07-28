@@ -104,9 +104,17 @@ class HRIRInterpolator:
 
         # create new grid of azimuth angles, in SOFA these range from [-180, +180] degrees
         # call the variable az_angles
+        # create new grid of azimuth angles, in SOFA these range from [-180, +180] degrees
+        az_angles = np.arange(-180, 180 + new_az_res, new_az_res)
+
+
 
         # create new grid of elevation angles, in SOFA these range from [-90 +90] degrees
         # call the variable el_angles
+        # create new grid of elevation angles, in SOFA these range from [-90, +90] degrees
+        el_angles = np.arange(-90, 90 + new_el_res, new_el_res)
+
+
 
         # create a 2D meshgrid with both azimuth and elevation angles
         new_az_grid, new_el_grid = np.meshgrid(az_angles, el_angles)
@@ -139,14 +147,34 @@ class HRIRInterpolator:
             #### WRITE YOUR CODE HERE ####
 
             # find theta_grid and phi_grid
+            theta_grid = az_grid[1] - az_grid[0]  # azimuth grid spacing
+            phi_grid = el_grid[1] - el_grid[0]    # elevation grid spacing
 
             # find c_theta and c_phi
+            az_base = az_grid[az_idx]
+            el_base = el_grid[el_idx]
+
+            c_theta = (az_new - az_base) / theta_grid
+            c_phi = (el_new - el_base) / phi_grid
 
             # get the interpolation weights
 
-            # get the four nearest HRIRs (use get_index() function)
 
+            # get the four nearest HRIRs (use get_index() function)
+            h_a = self.hrir_set.hrir_data[get_index(el_idx, az_idx)]           # bottom-left
+            h_b = self.hrir_set.hrir_data[get_index(el_idx, az_idx + 1)]       # bottom-right
+            h_c = self.hrir_set.hrir_data[get_index(el_idx + 1, az_idx)]       # top-left
+            h_d = self.hrir_set.hrir_data[get_index(el_idx + 1, az_idx + 1)]   # top-right
+            
+            
             # find the interpolated HRIR and append it to hrirs_interp
+            h_interp = (
+                (1 - c_theta) * (1 - c_phi) * h_a +
+                c_theta * (1 - c_phi) * h_b +
+                (1 - c_theta) * c_phi * h_c +
+                c_theta * c_phi * h_d
+            )
+            hrirs_interp.append(h_interp)
 
         # Stack all interpolated HRIRs into numpy array
         hrirs_interp = np.stack(
