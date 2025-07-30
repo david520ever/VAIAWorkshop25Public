@@ -149,11 +149,26 @@ def rir_from_sweep(meas_sweep: Union[ArrayLike, NDArray],
 
     #### WRITE YOUR CODE HERE ####
 
+    # time flip the dry sweep signal  
     # time flip the dry sweep signal
+    dry_sweep_trunc_flip = dry_sweep_trunc[::-1, :]
 
     # convolve the measured sweep signals and the time flipped dry sweep signal
+    # convolve the measured sweep signals and the time flipped dry sweep signal
+    from scipy.signal import fftconvolve
+
+    rir_list = []
+    for ch in range(meas_sweep_trunc.shape[1]):
+        rir_ch = fftconvolve(meas_sweep_trunc[:, ch], dry_sweep_trunc_flip[:, ch], mode='full')
+        rir_list.append(rir_ch)
+
+    # zero-pad to make all RIRs the same length (max length)
+    max_len = max(len(r) for r in rir_list)
+    rir = np.stack([np.pad(r, (0, max_len - len(r))) for r in rir_list], axis=-1)
 
     # return the RIRs
+    # return the RIRs
+    return rir
 
 
 def audioread(rir_path: str, to_mono: bool = True) -> tuple[np.ndarray, int]:
