@@ -8,6 +8,8 @@ from scipy.spatial import ConvexHull
 import spaudiopy as spa
 from tqdm import tqdm
 
+from spaudiopy.sph import sh_rotation_matrix
+
 from utils import cart2sph, sph2cart, unpack_coordinates
 
 
@@ -91,7 +93,7 @@ def convert_srir_to_brir(srirs: NDArray, hrir_sh: NDArray,
     logger.info("Done calculating FFTs")
 
     num_orientations = head_orientations.shape[0]
-    brirs = np.zeros((num_receivers, num_orientations, num_freq_bins, 2))
+    brirs = np.zeros((num_receivers, num_orientations, num_freq_bins, 2), dtype=np.complex128)
 
     #### WRITE YOUR CODE HERE ####
 
@@ -99,21 +101,31 @@ def convert_srir_to_brir(srirs: NDArray, hrir_sh: NDArray,
     for rec_pos_idx in tqdm(range(num_receivers)):
 
         # get current SRIR FFT = shape is num_ambi_channels x num_freqs
-
+        H_sh = ambi_rtfs[rec_pos_idx, :, :]  # (num_ambi_channels, num_freq_bins)
+        
         # loop through head orientations
         for ori_idx in range(num_orientations):
 
-            pass
+            
             # get current head orientation
+            az, el = head_orientations[ori_idx]  # degrees
 
             # get rotation matrix in the opposite direction - size num_freq_bins x num_ambi_channels
+            D = sh_rotation_matrix(ambi_order, -az, -el, degrees=True)
 
             # get current rotated SRIR
+            H_shrot = D @ H_sh  # (num_ambi_channels, num_freq_bins)
+
 
             # get the binaural room transfer function by conjugating
             # freq-domain SRIRs and multiplying them with SH-HRTFs
+            for ch in range(2):  # 0: left ear, 1: right ear
+                G_conj = np.conj(ambi_hrtfs[:, ch, :])  # (num_ambi_channels, num_freq_bins)
+                BRIR_freq = np.sum(G_conj * H_shrot, axis=0)  # (num_freq_bins,)
+                brirs[rec_pos_idx, ori_idx, :, ch] = BRIR_freq
+
 
             # get the BRIR by taking an inverse FFT and save it to current
             # receiver position and orientation index
-
+    brirs = irfft(brirs, n=num_freq_bins, axis=2)
     return brirs

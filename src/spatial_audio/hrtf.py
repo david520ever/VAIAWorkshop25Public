@@ -82,25 +82,65 @@ class HRIRSet:
         #### WRITE YOUR CODE HERE ####
 
         # Get the FFT of the HRIRs and save it as the variable hrtfs
+        hrirs = self.hrir_data  # shape: (num_dirs, 2, num_time_samples)
+        hrirs = np.transpose(hrirs, (0, 2, 1))  # shape: (num_dirs, num_time_samples, 2)
+        hrtfs = np.fft.rfft(hrirs, n=fft_size, axis=1)  # shape: (num_dirs, num_freq_bins, 2)
 
         # Create the spherical grid
         incidence_az = np.deg2rad(self.listener_view[..., 0])
         # zenith angle is different from elevation angle
-        incidence_zen = np.deg2rad(90 -
-                                   self.listener_view[..., 1])  # zenith angle
+        incidence_zen = np.deg2rad(90 - self.listener_view[..., 1])  # zenith angle
 
         # Get quadrature weights from spa.grids.calculate_grid_weights
         # and create a diagonal matrix out of them, call it W.
+        from spaudiopy.grids import calculate_grid_weights
+        from spaudiopy.sph import sh_matrix
+
+        try:
+            weights = calculate_grid_weights(incidence_az, incidence_zen)
+            if np.any(weights < 0) or np.any(np.isnan(weights)):
+                raise ValueError("Weights contain negative or NaN values.")
+        except Exception as e:
+            print("Warning: fallback to uniform weights due to:", e)
+            weights = np.ones_like(incidence_az) / incidence_az.shape[0]
+
+        # ✅ Debug info
+        print("weights shape:", weights.shape)
+        print("unique weights:", np.unique(weights))
+        
+        W = np.diag(weights)  # shape: (num_dirs, num_dirs)
 
         # Get spherical harmonic matrix, Y, using incidence_az, incidence_zen - shape (num_dirs, num_sh_channels)
 
+        Y = sh_matrix(ambi_order, incidence_az, incidence_zen)  # shape: (num_dirs, num_sh_channels)
+
         # Calculate (WY)^\dagger W
+        WY = W @ Y  # shape: (num_dirs, num_sh)
+        WY_dagger_W = np.linalg.pinv(WY) @ W  # shape: (num_sh, num_dirs)
 
         # Multiply (WY)^\dagger W with hrtfs to get output of shape num_sh_channels, 2, num_freq_bins
+        num_sh = Y.shape[1]
+        num_freqs = hrtfs.shape[1]
+        sh_hrtfs = np.zeros((num_sh, num_freqs, 2), dtype=np.complex64)
 
-        # Take inverse FFT to get SH domain BRIR of shape: (num_sh_channels, 2, num_time_samples) and return it
+        for ear in range(2):
+            sh_hrtfs[..., ear] = WY_dagger_W @ hrtfs[..., ear]  # (num_sh, num_freqs)
 
-        return
+        # Take inverse FFT to get SH domain HRIR of shape: (num_sh_channels, 2, num_time_samples) and return it
+        sh_hrirs = np.fft.irfft(sh_hrtfs, n=fft_size, axis=1)  # shape: (num_sh, num_time_samples, 2)
+        sh_hrirs = sh_hrirs[:, :self.ir_len_samps, :]  # truncate to original HRIR length
+        
+        # Optional normalize here if needed for listening/rendering
+        #sh_hrirs /= np.max(np.abs(sh_hrirs)) + 1e-10
+        
+        # Debug
+        print("max(abs(hrirs)) =", np.max(np.abs(hrirs)))
+        print("max(abs(hrtfs)) =", np.max(np.abs(hrtfs)))
+        print("max(abs(WY_dagger_W)) =", np.max(np.abs(WY_dagger_W)))
+        print("max(abs(sh_hrtfs)) =", np.max(np.abs(sh_hrtfs)))
+        print("max(abs(sh_hrirs)) =", np.max(np.abs(sh_hrirs)))
+
+        return sh_hrirs
 
 
 class HRIRInterpolator:
