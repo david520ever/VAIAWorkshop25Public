@@ -192,14 +192,44 @@ class SIRR:
 
         # calculate the velocity vector from the X,Y,Z channels of B-format RIRs
 
+        # W, X, Y, Z channel extraction (B-format)
+        W = cur_stft_frame[0]
+        X = cur_stft_frame[1]
+        Y = cur_stft_frame[2]
+        Z = cur_stft_frame[3]
+        # Calculate particle velocity vector V = (X, Y, Z)
+        velocity = np.stack([X, Y, Z], axis=-1)  # shape: (num_freq_bins, 3)
+
         # calculate the intensity vector from the velocity vector and W channel
+        # Calculate intensity vector: I(f) = Re{P*(f) * V(f)} / Z0
+        # W is pressure, V is velocity
+        intensity_vector = np.real((W[:, np.newaxis].conj()) * velocity) / self.impedance  # (num_freq_bins, 3)
+
 
         # calculate diffuseness metric
+        # Calculate diffuseness: ψ = 1 - |I| / (|P| * |V|)
+        intensity_norm = np.linalg.norm(intensity_vector, axis=-1)  # (num_freq_bins,)
+        pressure_mag = np.abs(W) + _eps  # avoid zero
+        velocity_mag = np.linalg.norm(velocity, axis=-1) + _eps
+        diffuseness = 1 - (intensity_norm / (pressure_mag * velocity_mag))
+        diffuseness = np.clip(diffuseness, 0.0, 1.0)
 
         # calculate azimuth and elevation from the diffuseness metric
+        # Calculate direction: azimuth and elevation from intensity vector
+        x = intensity_vector[:, 0]
+        y = intensity_vector[:, 1]
+        z = intensity_vector[:, 2]
+        azimuth = np.arctan2(y, x)  # radians
+        elevation = np.arcsin(z / (np.linalg.norm(intensity_vector, axis=-1) + _eps))
+
 
         # return an object of type SIRRParameters
-        return
+        return SIRRParameters(
+        intensity_vector=intensity_vector,
+        diffuseness_metric=diffuseness,
+        azimuth=azimuth,
+        elevation=elevation
+        )
 
     def process_frame(self, cur_stft_frame: NDArray) -> NDArray:
         """
@@ -218,14 +248,25 @@ class SIRR:
         #### WRITE YOUR CODE HERE ####
 
         # decompose into directional part = sqrt(1 - smoothed_diffuseness_metric) * W
+        # W channel only
+        W = cur_stft_frame[0]
 
         # process directional part
+        # directional = sqrt(1 - d) * W
+        dir_gain = np.sqrt(1 - self.smoothed_params.diffuseness_metric)
+        directional_part = (dir_gain * W).astype(np.complex64)
 
-        # decompose into diffuse part = smoothed_diffuseness_metric * W**2
-
+        # decompose into diffuse part = smoothed_diffuseness_metric * W**2 ??
+        # diffuse = sqrt(d) * W
+        diff_gain = np.sqrt(self.smoothed_params.diffuseness_metric)
+        diffuse_part = (diff_gain * W).astype(np.complex64)
         # process diffuse part
+        # process both
+        dir_output = self.process_directional_part(directional_part)
+        diff_output = self.process_diffuse_part(diffuse_part)
 
         # add directional and diffuse parts and return output
+        return dir_output + diff_output
 
     def process_directional_part(self, directional_part: NDArray) -> NDArray:
         """
@@ -245,16 +286,24 @@ class SIRR:
 
         # get the target direction of the directional component in cartesian
         # coordinates from the DoAs
+        # Convert smoothed azimuth & elevation to cartesian
+        doa_cartesian = sph2cart(
+            self.smoothed_params.azimuth,
+            self.smoothed_params.elevation,
+            np.ones_like(self.smoothed_params.azimuth)  # r = 1
+        )  # shape: (num_freq_bins, 3)
 
         # get loudspeaker_gains using VBAP by calling self.vbap.process()
         # shape is  (num_loudspeakers, num_freq_bins)
+        loudspeaker_gains = self.vbap.process(doa_cartesian) 
 
         # get the directional signal for each loudspeaker by
         # multiplying directional_part with loudspeaker_gains
         # shape is (num_loudspeakers, num_freq_bins)
+        directional_signals = loudspeaker_gains * directional_part[None, :]
 
         # return directional part for all loudspeakers
-        return
+        return directional_signals
 
     def process_diffuse_part(self, diffuse_part: NDArray) -> NDArray:
         """
